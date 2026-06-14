@@ -3,6 +3,10 @@
   "version": "2.0.0",
   "description": "Optimized Desktop Dinosaur Screen Pet",
   "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chakma-s/ScreenPet.git"
+  },
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
