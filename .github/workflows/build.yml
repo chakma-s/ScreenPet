@@ -1,4 +1,4 @@
-name: Build ScreenPet Standalone Apps
+name: Build and Release ScreenPet
 
 on:
   push:
@@ -47,3 +47,32 @@ jobs:
             ScreenPet-Electron/dist/*.dmg
             ScreenPet-Electron/dist/*.exe
             ScreenPet-Electron/dist/portable/*.exe
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: screenpet-windows-latest
+          path: dist/
+
+      - name: Download macOS Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: screenpet-macos-latest
+          path: dist/
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "dist/**/*.dmg,dist/**/*.exe"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: "v2.0.0"
+          name: "ScreenPet v2.0.0"
+          body: "Official release of ScreenPet: Desktop Dinosaur Pet.\n\nDownloads:\n- **macOS**: Download the `.dmg` file for Mac.\n- **Windows**: Download the `.exe` file (standalone portable for Windows)."
+          allowUpdates: true
