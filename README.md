@@ -1,10 +1,10 @@
-# 🦖 ScreenPet — Desktop Dinosaur T-Rex Pet
+# ScreenPet — Desktop Baby Dinosaur T-Rex Pet
 
 ScreenPet is a lightweight, transparent, always-on-top virtual screen pet designed in a hand-drawn Ghibli sketch style. It orbits your cursor, reacts to your inputs, adapts to your system theme, and has a negligible CPU and RAM footprint.
 
 ---
 
-## 🎨 Features
+## Features
 1. **Interactive Dynamics**:
    - **Real-Time Keyboard Typing**: When you type anywhere on your OS, the dinosaur sits down and starts typing rapidly on its tiny laptop.
    - **Clicking Mouse**: Shaking your cursor quickly triggers the rapid mouse-clicking animation where the dinosaur holds and clicks a computer mouse.
@@ -18,7 +18,7 @@ ScreenPet is a lightweight, transparent, always-on-top virtual screen pet design
 
 ---
 
-## 📦 Download Standalone Installers
+## Download Standalone Installers
 Go to the **Releases** section on the right sidebar of this repository to download the latest pre-built standalone packages:
 
 * **Windows**: Download **`ScreenPet.exe`** (standalone portable app, no runtime installation needed).
@@ -26,7 +26,7 @@ Go to the **Releases** section on the right sidebar of this repository to downlo
 
 ---
 
-## 📂 Project Architecture
+## Project Architecture
 The project is divided into two implementations:
 
 ### 1. Windows Native Edition (`/ScreenPet`)
@@ -48,7 +48,7 @@ Built using **Electron, HTML5 Canvas, and Node.js**. It runs natively on macOS, 
 
 ---
 
-## 🚀 How to Install on macOS
+## How to Install on macOS
 
 1. Download the **`ScreenPet.dmg`** file from the Releases page.
 2. Double-click the `.dmg` file to mount it, and drag **ScreenPet** into your **Applications** folder.
