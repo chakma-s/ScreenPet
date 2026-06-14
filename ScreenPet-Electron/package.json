@@ -1,0 +1,43 @@
+{
+  "name": "screenpet",
+  "version": "2.0.0",
+  "description": "Optimized Desktop Dinosaur Screen Pet",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "electron": "^30.0.9",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.screenpet.app",
+    "productName": "ScreenPet",
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.utilities",
+      "icon": "assets/icon.png"
+    },
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "assets/icon.png"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "index.html",
+      "assets/**/*"
+    ]
+  }
+}

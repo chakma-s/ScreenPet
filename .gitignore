@@ -1,0 +1,17 @@
+# .NET Build Output
+**/bin/
+**/obj/
+**/publish/
+**/standalone_test/
+*.pdb
+*.dll
+*.exe
+
+# Node/Electron Build Output
+**/node_modules/
+**/dist/
+.env
+
+# OS-specific files
+.DS_Store
+Thumbs.db

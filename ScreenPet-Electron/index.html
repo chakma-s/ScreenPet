@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+      -webkit-app-region: no-drag;
+    }
+    canvas {
+      display: block;
+      width: 100px;
+      height: 100px;
+      background: transparent;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="100" height="100"></canvas>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    const canvas = document.getElementById('canvas');
+    let canvasCtx = null;
+
+    // Sprite sources configuration
+    const spriteSources = {
+      idle: 'assets/sprites/dino_idle.png',
+      walk: 'assets/sprites/dino_walk.png',
+      sleep: 'assets/sprites/dino_sleep.png',
+      type: 'assets/sprites/dino_type.png',
+      click: 'assets/sprites/dino_click.png'
+    };
+
+    const sprites = {};
+    const processedSprites = {
+      normal: {},   // black outline for light backgrounds
+      inverted: {}  // white outline for dark backgrounds
+    };
+
+    let imagesLoaded = 0;
+    const totalImages = Object.keys(spriteSources).length;
+
+    // Cursor position & tracking states
+    let cursorX = 0;
+    let cursorY = 0;
+    let lastCursorX = 0;
+    let lastCursorY = 0;
+
+    // Background theme state (Dark mode vs Light mode)
+    let isDarkBackground = false;
+
+    // Brain State Machine
+    let state = 0; // 0=Idle, 1=Following, 2=Reacting, 3=Playing, 4=Sleeping
+    let idleTimer = 0;
+    let reactTimer = 0;
+    let playDurTimer = 0;
+    let isPaused = false;
+
+    const DT = 33; // Tick interval (~30 FPS)
+    const ReactMs = 950;
+    const ReactSpeedPx = 13; // Shake threshold
+
+    // Orbit Physics parameters (matching C# exactly)
+    let orbitAngle = Math.random() * Math.PI * 2;
+    let wobblePhase = Math.random() * Math.PI * 2;
+    let radiusPhase = Math.random() * Math.PI * 2;
+    let smoothX = 0;
+    let smoothY = 0;
+
+    const InnerRadius = 62;
+    const OuterRadius = 118;
+    const BaseAngSpeed = 0.006; // Calm 35-second orbit
+    const WobbleSpeed = 0.006;
+    const WobbleAmp = 0.009;
+    const RadiusBobSpd = 0.008;
+    const SmoothFactor = 0.18;
+
+    let breathPhase = Math.random() * Math.PI * 2;
+    let extraPhase = Math.random() * Math.PI * 2;
+
+    // Start loading assets
+    loadAllSprites();
+
+    function loadAllSprites() {
+      for (const [key, src] of Object.entries(spriteSources)) {
+        const img = new Image();
+        img.onload = () => {
+          sprites[key] = img;
+          imagesLoaded++;
+          if (imagesLoaded === totalImages) {
+            preprocessAllSprites();
+            startApp();
+          }
+        };
+        img.src = src;
+      }
+    }
+
+    function preprocessAllSprites() {
+      for (const [key, img] of Object.entries(sprites)) {
+        processedSprites.normal[key] = processLumaTransparency(img, false);
+        processedSprites.inverted[key] = processLumaTransparency(img, true);
+      }
+    }
+
+    function processLumaTransparency(img, invert) {
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = img.width;
+      tempCanvas.height = img.height;
+      const tempCtx = tempCanvas.getContext('2d');
+      tempCtx.drawImage(img, 0, 0);
+
+      const imgData = tempCtx.getImageData(0, 0, img.width, img.height);
+      const data = imgData.data;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+
+        if (luma >= 215) {
+          data[i + 3] = 0; // Crop paper background completely
+        } else {
+          // Map dark pencil lines to opaque (alpha = 255) via gamma/power curve to keep lines thin & sharp
+          const t = Math.max(0, Math.min(1, (215 - luma) / 145));
+          const alpha = Math.floor(Math.pow(t, 2.5) * 255);
+          data[i + 3] = alpha;
+
+          if (invert) {
+            data[i] = 255;
+            data[i + 1] = 255;
+            data[i + 2] = 255;
+          }
+        }
+      }
+      tempCtx.putImageData(imgData, 0, 0);
+      return tempCanvas;
+    }
+
+    function transitionTo(nextState) {
+      if (state === nextState) return;
+      state = nextState;
+    }
+
+    // IPC event listeners
+    ipcRenderer.on('cursor-update', (event, cursor) => {
+      cursorX = cursor.x;
+      cursorY = cursor.y;
+    });
+
+    ipcRenderer.on('theme-change', (event, isDark) => {
+      isDarkBackground = isDark;
+    });
+
+    ipcRenderer.on('pause-state', (event, paused) => {
+      isPaused = paused;
+    });
+
+    ipcRenderer.on('keypress', () => {
+      if (isPaused) return;
+
+      if (state === 4) { // Sleeping -> Wake up
+        idleTimer = 0;
+        transitionTo(1); // Following
+      }
+      playDurTimer = 1200; // Reset 1.2s typing duration buffer
+      if (state !== 3 && state !== 2) {
+        transitionTo(3); // Playing (typing)
+      }
+    });
+
+    // Request initial system theme
+    ipcRenderer.send('get-initial-theme');
+
+    function updateBrain(cursorSpeed, isMoving) {
+      if (reactTimer > 0) {
+        reactTimer -= DT;
+        if (reactTimer <= 0) {
+          transitionTo(isMoving ? 1 : 0);
+        }
+        return;
+      }
+
+      if (cursorSpeed > ReactSpeedPx && state !== 4) {
+        reactTimer = ReactMs;
+        transitionTo(2); // Reacting (clicking mouse)
+        idleTimer = 0;
+        return;
+      }
+
+      if (state === 3) { // Playing (typing)
+        playDurTimer -= DT;
+        if (playDurTimer <= 0) {
+          transitionTo(isMoving ? 1 : 0);
+        }
+        return;
+      }
+
+      if (state === 4) { // Sleeping
+        if (isMoving) {
+          idleTimer = 0;
+          transitionTo(1); // Wake up and follow
+        }
+        return;
+      }
+
+      if (isMoving) {
+        idleTimer = 0;
+        transitionTo(1); // Following
+      } else {
+        idleTimer += DT;
+        if (idleTimer >= 30000) {
+          transitionTo(4); // Sleeping
+        } else if (idleTimer >= 3000) {
+          transitionTo(0); // Idle
+        }
+      }
+    }
+
+    function updateOrbit(cx, cy, isTyping) {
+      let rawX, rawY;
+
+      if (isTyping) {
+        // Place strictly to the right side of the cursor (90px offset)
+        rawX = cx + 90;
+        rawY = cy;
+      } else {
+        wobblePhase += WobbleSpeed;
+        const angSpeed = BaseAngSpeed + Math.sin(wobblePhase) * WobbleAmp;
+        orbitAngle += angSpeed;
+
+        radiusPhase += RadiusBobSpd;
+        const mid = (InnerRadius + OuterRadius) * 0.5;
+        const half = (OuterRadius - InnerRadius) * 0.5;
+        const radius = mid + Math.sin(radiusPhase) * half * 0.88;
+
+        rawX = cx + Math.cos(orbitAngle) * radius;
+        rawY = cy + Math.sin(orbitAngle) * radius;
+      }
+
+      if (smoothX === 0 && smoothY === 0) {
+        smoothX = rawX;
+        smoothY = rawY;
+      }
+
+      smoothX += (rawX - smoothX) * SmoothFactor;
+      smoothY += (rawY - smoothY) * SmoothFactor;
+
+      return { x: smoothX, y: smoothY };
+    }
+
+    function drawPet(ctx, petState, facingRight) {
+      ctx.clearRect(0, 0, 100, 100);
+
+      breathPhase += 0.046;
+      extraPhase += 0.075;
+
+      let spriteKey = 'idle';
+      if (petState === 4) spriteKey = 'sleep';
+      else if (petState === 2) spriteKey = 'click';
+      else if (petState === 3) spriteKey = 'type';
+      else if (petState === 1) spriteKey = 'walk';
+
+      const pool = isDarkBackground ? processedSprites.inverted : processedSprites.normal;
+      const spriteCanvas = pool[spriteKey];
+      if (!spriteCanvas) return;
+
+      ctx.save();
+
+      const breath = 1.0 + Math.sin(breathPhase) * 0.015;
+      const drawW = 100 * breath;
+      const drawH = 100 * breath;
+      const drawX = (100 - drawW) / 2;
+      const drawY = (100 - drawH) / 2;
+
+      ctx.translate(50, 50);
+
+      // Horizontal flip mapping
+      if (facingRight) {
+        ctx.scale(-1, 1);
+      }
+
+      // Physics transformation bobbing/jitter (matching C# values)
+      if (petState === 1) { // Walk waddle waddle
+        const walkBob = Math.abs(Math.sin(breathPhase * 2.5)) * 3.5;
+        const walkTilt = Math.sin(breathPhase * 2.5) * (5 * Math.PI / 180);
+        ctx.translate(0, -walkBob);
+        ctx.rotate(walkTilt);
+      } else if (petState === 2) { // Mouse clicking bob
+        const clickBob = Math.abs(Math.sin(breathPhase * 18)) * 3.5;
+        ctx.translate(0, -clickBob);
+      } else if (petState === 3) { // Typing jitter
+        const typeJitterX = Math.sin(breathPhase * 16) * 1.5;
+        const typeJitterY = Math.cos(breathPhase * 16) * 1.0;
+        ctx.translate(typeJitterX, typeJitterY);
+      } else if (petState === 4) { // Breathing sleep bob
+        const sleepBob = Math.sin(breathPhase * 0.7) * 1.2;
+        ctx.translate(0, sleepBob);
+      }
+
+      ctx.drawImage(spriteCanvas, drawX - 50, drawY - 50, drawW, drawH);
+      ctx.restore();
+
+      // Zzz floating text rendering
+      if (petState === 4) {
+        drawSleepZzz(ctx, 50, 50, 36, extraPhase);
+      }
+    }
+
+    function drawSleepZzz(ctx, cx, cy, r, phase) {
+      ctx.fillStyle = isDarkBackground ? 'rgba(255, 255, 255, 0.65)' : 'rgba(0, 0, 0, 0.65)';
+      ctx.textBaseline = 'middle';
+      for (let i = 0; i < 3; i++) {
+        const sc = 0.6 + i * 0.2;
+        ctx.font = `bold ${Math.round(7 * sc)}px Arial`;
+        const zx = cx + r * 0.5 + i * r * 0.18;
+        const zy = cy - r * 0.85 - i * r * 0.22 + Math.sin(phase + i) * r * 0.06;
+        ctx.fillText('Z', zx, zy);
+      }
+    }
+
+    function tick() {
+      if (isPaused) return;
+
+      const dx = cursorX - lastCursorX;
+      const dy = cursorY - lastCursorY;
+      const speed = Math.sqrt(dx * dx + dy * dy);
+      const isMoving = speed > 1.5;
+
+      lastCursorX = cursorX;
+      lastCursorY = cursorY;
+
+      // Update state machine
+      updateBrain(speed, isMoving);
+
+      // Update position
+      const isTyping = state === 3;
+      const pos = updateOrbit(cursorX, cursorY, isTyping);
+
+      // Determine horizontal facing side
+      const facingRight = cursorX > pos.x;
+
+      // Draw dino frame
+      drawPet(canvasCtx, state, facingRight);
+
+      // Send position update back to window bounds manager
+      const wx = pos.x - 50;
+      const wy = pos.y - 50;
+      ipcRenderer.send('move-window', { x: wx, y: wy });
+    }
+
+    function startApp() {
+      canvasCtx = canvas.getContext('2d');
+      setInterval(tick, DT);
+      lastCursorX = cursorX;
+      lastCursorY = cursorY;
+    }
+  </script>
+</body>
+</html>
